@@ -1,0 +1,36 @@
+# Source files (dist is included)
+src/
+
+# Config files
+tsconfig.json
+.env
+.env.local
+.env.*.local
+.env.example
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Claude/MCP development
+.claude/
+.mcp.json
+
+# Development files
+node_modules/
+coverage/
+tmp/
+temp/
+*.log
+npm-debug.log*
