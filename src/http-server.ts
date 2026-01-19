@@ -6,7 +6,9 @@
  * This module provides an HTTP server for the Tability MCP server,
  * compatible with remote MCP clients like ChatGPT, Langdock, etc.
  *
- * The server exposes the /mcp endpoint using the Streamable HTTP transport.
+ * The server exposes:
+ * - /mcp endpoint using the Streamable HTTP transport (modern)
+ * - /sse endpoint using SSE transport (legacy, for backwards compatibility)
  */
 
 import express, { type Request, type Response } from 'express';
@@ -14,6 +16,7 @@ import cors from 'cors';
 import { randomUUID } from 'crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { initClient } from './services/tability-client.js';
 import { registerTools } from './tools.js';
 
@@ -24,14 +27,17 @@ const PORT = process.env.PORT || 8080;
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'mcp-session-id', 'X-API-Token'],
   exposedHeaders: ['mcp-session-id'],
 }));
 
 app.use(express.json());
 
-// Store active transports by session ID
+// Store active transports by session ID (for Streamable HTTP)
 const transports = new Map<string, StreamableHTTPServerTransport>();
+
+// Store active SSE transports by session ID (for legacy SSE)
+const sseTransports = new Map<string, SSEServerTransport>();
 
 /**
  * Extract API token from request
@@ -96,7 +102,9 @@ app.get('/', (_req: Request, res: Response) => {
     version: '1.0.0',
     description: 'MCP server for Tability.app - OKR and goal tracking platform',
     endpoints: {
-      mcp: '/mcp',
+      mcp: '/mcp (Streamable HTTP - modern)',
+      sse: '/sse (SSE - legacy)',
+      messages: '/messages (SSE messages endpoint)',
       health: '/health',
     },
     authentication: {
@@ -188,9 +196,135 @@ app.delete('/mcp', (req: Request, res: Response) => {
   }
 });
 
+// =============================================================================
+// Legacy SSE Transport (for backwards compatibility with older clients)
+// =============================================================================
+
+/**
+ * SSE endpoint - establishes Server-Sent Events connection
+ * This is the legacy transport for clients that don't support Streamable HTTP
+ */
+app.get('/sse', async (req: Request, res: Response) => {
+  // Extract API token
+  const apiToken = extractApiToken(req);
+
+  if (!apiToken) {
+    res.status(401).json({
+      error: 'Authentication required',
+      message: 'Please provide your Tability API token via Authorization header (Bearer token), X-API-Token header, or config query parameter',
+    });
+    return;
+  }
+
+  console.log('New SSE connection established');
+
+  // Create SSE transport - the /messages endpoint will handle POST requests
+  const transport = new SSEServerTransport('/messages', res);
+
+  // Generate a session ID for this connection
+  const sessionId = randomUUID();
+  sseTransports.set(sessionId, transport);
+
+  // Create and connect MCP server
+  const mcpServer = createMcpServer(apiToken);
+
+  // Clean up on close
+  transport.onclose = () => {
+    console.log(`SSE connection closed: ${sessionId}`);
+    sseTransports.delete(sessionId);
+  };
+
+  try {
+    await mcpServer.server.connect(transport);
+    console.log(`SSE transport connected: ${sessionId}`);
+  } catch (error) {
+    console.error('SSE connection error:', error);
+    sseTransports.delete(sessionId);
+    if (!res.headersSent) {
+      res.status(500).json({
+        error: 'Failed to establish SSE connection',
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+});
+
+/**
+ * Messages endpoint - handles POST messages for SSE transport
+ */
+app.post('/messages', async (req: Request, res: Response) => {
+  // Extract API token
+  const apiToken = extractApiToken(req);
+
+  if (!apiToken) {
+    res.status(401).json({
+      error: 'Authentication required',
+      message: 'Please provide your Tability API token',
+    });
+    return;
+  }
+
+  // Find the transport for this session
+  // The session ID might be in a query param or we need to find the right transport
+  const sessionId = req.query.sessionId as string | undefined;
+
+  // If we have a session ID, use that transport
+  if (sessionId && sseTransports.has(sessionId)) {
+    const transport = sseTransports.get(sessionId)!;
+    try {
+      await transport.handlePostMessage(req, res, req.body);
+    } catch (error) {
+      console.error('SSE message error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({
+          error: 'Failed to process message',
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
+      }
+    }
+    return;
+  }
+
+  // If no session ID, try to find a transport (for single-connection scenarios)
+  // This is a fallback for clients that don't send session IDs
+  if (sseTransports.size === 1) {
+    const transport = sseTransports.values().next().value;
+    if (transport) {
+      try {
+        await transport.handlePostMessage(req, res, req.body);
+      } catch (error) {
+        console.error('SSE message error:', error);
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: 'Failed to process message',
+            message: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+      return;
+    }
+  }
+
+  // If multiple transports and no session ID, we can't determine which one to use
+  if (sseTransports.size > 1) {
+    res.status(400).json({
+      error: 'Session ID required',
+      message: 'Multiple SSE connections active. Please include sessionId query parameter.',
+    });
+    return;
+  }
+
+  // No active SSE connections
+  res.status(404).json({
+    error: 'No active SSE connection',
+    message: 'Please establish an SSE connection first by connecting to /sse',
+  });
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`Tability MCP Server running on port ${PORT}`);
-  console.log(`MCP endpoint: http://localhost:${PORT}/mcp`);
+  console.log(`Streamable HTTP: http://localhost:${PORT}/mcp`);
+  console.log(`Legacy SSE: http://localhost:${PORT}/sse`);
   console.log(`Health check: http://localhost:${PORT}/health`);
 });
