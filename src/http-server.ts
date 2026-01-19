@@ -30,6 +30,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Serve static files from public directory
+// In dev: __dirname is src/, public is ../public
+// In prod: __dirname is dist/, public is ../public
 app.use(express.static(path.join(__dirname, '../public')));
 
 // Middleware
@@ -106,7 +108,9 @@ app.get('/health', (_req: Request, res: Response) => {
 });
 
 // Root endpoint - serve the setup page
-// The static middleware will handle serving index.html
+app.get('/', (_req: Request, res: Response) => {
+  res.sendFile(path.join(__dirname, '../public/index.html'));
+});
 
 // API info endpoint
 app.get('/api/info', (_req: Request, res: Response) => {
