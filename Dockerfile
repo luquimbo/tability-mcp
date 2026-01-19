@@ -28,6 +28,9 @@ RUN npm ci --omit=dev
 # Copy built files from builder stage
 COPY --from=builder /app/dist ./dist
 
+# Copy public files for the setup page
+COPY public/ ./public/
+
 # Set environment variables
 ENV NODE_ENV=production
 ENV PORT=8080
