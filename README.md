@@ -64,11 +64,11 @@ This MCP server provides **27 tools** covering all Tability API endpoints:
 3. Copy your Personal API token
 4. Ensure "API access" is enabled in each workspace you want to use
 
-### Setup
+### Install from Source
 
 ```bash
-# Clone or download this repository
-git clone <repository-url>
+# Clone the repository
+git clone https://github.com/luquimbo/tability-mcp.git
 cd tability-mcp
 
 # Install dependencies
