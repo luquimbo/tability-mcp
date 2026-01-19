@@ -1,0 +1,16 @@
+# Render Blueprint specification
+# https://docs.render.com/blueprint-spec
+
+services:
+  - type: web
+    name: tability-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 8080
