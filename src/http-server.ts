@@ -218,11 +218,11 @@ app.get('/sse', async (req: Request, res: Response) => {
 
   console.log('New SSE connection established');
 
-  // Create SSE transport - the /messages endpoint will handle POST requests
-  const transport = new SSEServerTransport('/messages', res);
-
   // Generate a session ID for this connection
   const sessionId = randomUUID();
+
+  // Create SSE transport with the session ID in the messages path
+  const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
   sseTransports.set(sessionId, transport);
 
   // Create and connect MCP server
