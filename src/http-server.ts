@@ -14,6 +14,8 @@
 import express, { type Request, type Response } from 'express';
 import cors from 'cors';
 import { randomUUID } from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
@@ -22,6 +24,13 @@ import { registerTools } from './tools.js';
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Get directory path for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, '../public')));
 
 // Middleware
 app.use(cors({
@@ -96,8 +105,11 @@ app.get('/health', (_req: Request, res: Response) => {
   res.json({ status: 'ok', service: 'tability-mcp' });
 });
 
-// Root endpoint with info
-app.get('/', (_req: Request, res: Response) => {
+// Root endpoint - serve the setup page
+// The static middleware will handle serving index.html
+
+// API info endpoint
+app.get('/api/info', (_req: Request, res: Response) => {
   res.json({
     name: 'Tability MCP Server',
     version: '1.0.0',
@@ -107,6 +119,7 @@ app.get('/', (_req: Request, res: Response) => {
       sse: '/sse (SSE - legacy)',
       messages: '/messages (SSE messages endpoint)',
       health: '/health',
+      setup: '/ (Setup page)',
     },
     authentication: {
       methods: [
