@@ -37,7 +37,8 @@ app.use(express.json());
 const transports = new Map<string, StreamableHTTPServerTransport>();
 
 // Store active SSE transports by session ID (for legacy SSE)
-const sseTransports = new Map<string, SSEServerTransport>();
+// Also store the API token with each session
+const sseTransports = new Map<string, { transport: SSEServerTransport; apiToken: string }>();
 
 /**
  * Extract API token from request
@@ -223,7 +224,7 @@ app.get('/sse', async (req: Request, res: Response) => {
 
   // Create SSE transport with the session ID in the messages path
   const transport = new SSEServerTransport(`/messages?sessionId=${sessionId}`, res);
-  sseTransports.set(sessionId, transport);
+  sseTransports.set(sessionId, { transport, apiToken });
 
   // Create and connect MCP server
   const mcpServer = createMcpServer(apiToken);
@@ -251,26 +252,15 @@ app.get('/sse', async (req: Request, res: Response) => {
 
 /**
  * Messages endpoint - handles POST messages for SSE transport
+ * Authentication is inherited from the SSE session, so no auth check needed here
  */
 app.post('/messages', async (req: Request, res: Response) => {
-  // Extract API token
-  const apiToken = extractApiToken(req);
-
-  if (!apiToken) {
-    res.status(401).json({
-      error: 'Authentication required',
-      message: 'Please provide your Tability API token',
-    });
-    return;
-  }
-
   // Find the transport for this session
-  // The session ID might be in a query param or we need to find the right transport
   const sessionId = req.query.sessionId as string | undefined;
 
   // If we have a session ID, use that transport
   if (sessionId && sseTransports.has(sessionId)) {
-    const transport = sseTransports.get(sessionId)!;
+    const { transport } = sseTransports.get(sessionId)!;
     try {
       await transport.handlePostMessage(req, res, req.body);
     } catch (error) {
@@ -286,12 +276,11 @@ app.post('/messages', async (req: Request, res: Response) => {
   }
 
   // If no session ID, try to find a transport (for single-connection scenarios)
-  // This is a fallback for clients that don't send session IDs
   if (sseTransports.size === 1) {
-    const transport = sseTransports.values().next().value;
-    if (transport) {
+    const session = sseTransports.values().next().value;
+    if (session) {
       try {
-        await transport.handlePostMessage(req, res, req.body);
+        await session.transport.handlePostMessage(req, res, req.body);
       } catch (error) {
         console.error('SSE message error:', error);
         if (!res.headersSent) {
